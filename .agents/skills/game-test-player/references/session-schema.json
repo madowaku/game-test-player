@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "game-test-player session report",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "skill",
+    "adapter",
+    "persona",
+    "scenario",
+    "mode",
+    "black_box",
+    "started_at",
+    "ended_at",
+    "play_time_s",
+    "action_count",
+    "observation_count",
+    "reached_point",
+    "outcome",
+    "insights",
+    "findings",
+    "reproduction_steps",
+    "evidence_screenshots",
+    "observations",
+    "actions",
+    "memos"
+  ],
+  "properties": {
+    "schema_version": {"const": "0.1"},
+    "skill": {"const": "game-test-player"},
+    "adapter": {"type": "string"},
+    "persona": {"type": "string"},
+    "scenario": {"type": "string"},
+    "mode": {"type": "string"},
+    "black_box": {"type": "boolean"},
+    "started_at": {"type": "string"},
+    "ended_at": {"type": ["string", "null"]},
+    "play_time_s": {"type": "number", "minimum": 0},
+    "action_count": {"type": "integer", "minimum": 0},
+    "observation_count": {"type": "integer", "minimum": 0},
+    "reached_point": {"type": "string"},
+    "outcome": {"enum": ["success", "failure", "timeout", "aborted", null]},
+    "outcome_reason": {"type": "string"},
+    "insights": {
+      "type": "object",
+      "required": [
+        "confusion_points",
+        "misread_ui",
+        "misunderstood_rules",
+        "stuck_candidates",
+        "bug_candidates",
+        "fun_moments",
+        "interest_drops",
+        "critical_ux_issues"
+      ],
+      "additionalProperties": {"type": "array", "items": {"$ref": "#/$defs/insight"}}
+    },
+    "findings": {"type": "array", "items": {"$ref": "#/$defs/finding"}},
+    "reproduction_steps": {"type": "array", "items": {"type": "string"}},
+    "evidence_screenshots": {"type": "array", "items": {"$ref": "#/$defs/evidence"}},
+    "observations": {"type": "array", "items": {"type": "object"}},
+    "actions": {"type": "array", "items": {"type": "object"}},
+    "memos": {"type": "array", "items": {"$ref": "#/$defs/memo"}},
+    "summary": {"type": "object"}
+  },
+  "$defs": {
+    "severity": {"enum": ["BLOCKER", "HIGH", "MEDIUM", "LOW", "OBSERVATION"]},
+    "evidence": {
+      "type": "object",
+      "required": ["path"],
+      "properties": {"path": {"type": "string"}, "step": {"type": ["integer", "null"]}}
+    },
+    "insight": {
+      "type": "object",
+      "required": ["text", "step", "severity", "evidence"],
+      "properties": {
+        "text": {"type": "string"},
+        "step": {"type": ["integer", "null"]},
+        "severity": {"$ref": "#/$defs/severity"},
+        "evidence": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "finding": {
+      "type": "object",
+      "required": ["id", "severity", "category", "title", "description", "impact", "reproduction", "evidence", "step"],
+      "properties": {
+        "id": {"type": "string"},
+        "severity": {"$ref": "#/$defs/severity"},
+        "category": {"type": "string"},
+        "title": {"type": "string"},
+        "description": {"type": "string"},
+        "impact": {"type": "string"},
+        "reproduction": {"type": "array", "items": {"type": "string"}},
+        "evidence": {"type": "array", "items": {"type": "string"}},
+        "step": {"type": ["integer", "null"]}
+      }
+    },
+    "memo": {
+      "type": "object",
+      "required": ["step", "recorded_at", "what_happening", "next_goal", "action", "reason", "confidence", "hesitation", "expected_result", "actual_result", "misunderstanding"],
+      "properties": {
+        "step": {"type": "integer", "minimum": 0},
+        "recorded_at": {"type": "string"},
+        "what_happening": {"type": "string"},
+        "next_goal": {"type": "string"},
+        "action": {"type": "string"},
+        "reason": {"type": "string"},
+        "confidence": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "hesitation": {"type": "boolean"},
+        "expected_result": {"type": "string"},
+        "actual_result": {"type": "string"},
+        "misunderstanding": {"type": "string"}
+      }
+    }
+  }
+}

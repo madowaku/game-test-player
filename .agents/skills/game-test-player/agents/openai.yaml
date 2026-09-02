@@ -1,0 +1,4 @@
+interface:
+  display_name: "Game Test Player"
+  short_description: "Black-box Godot playtesting from screenshots"
+  default_prompt: "Use $game-test-player to play this Godot game as a human-first tester and produce evidence-backed findings."
