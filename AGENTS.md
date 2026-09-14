@@ -113,3 +113,11 @@ When the host can execute Python, run both dependency-free checks after changing
 python .agents/skills/game-test-player/scripts/self_check.py
 python .agents/skills/game-test-player/scripts/self_check_mgop.py
 ```
+
+When the host is Windows and Godot 4 is available, changes to the Godot adapter, MGOP bridge, instrumented runner, or Evidence Bundle are not ready to merge until the real-engine smoke fixture also passes:
+
+```text
+python .agents/skills/game-test-player/scripts/run_godot_smoke.py
+```
+
+That smoke gate must prove one ordinary `SPACE` action changes the fixture from `IDLE` to `ACTIVATED` and produces matching screenshot, state, metrics, and errors evidence at the same step. A passing infrastructure smoke does not replace black-box or journey coverage.
