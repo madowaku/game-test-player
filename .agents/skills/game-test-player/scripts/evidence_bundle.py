@@ -49,11 +49,13 @@ class EvidenceBundle:
         if errors is not None:
             mgop["errors_path"] = str(self._write_json(self.errors_dir, "errors", resolved_step, errors))
         observation["mgop"] = mgop
-        self._entries.append({
-            "step": resolved_step,
-            "observed_at": observation["observed_at"],
-            **mgop,
-        })
+        self._entries.append(
+            {
+                "step": resolved_step,
+                "observed_at": observation["observed_at"],
+                **mgop,
+            }
+        )
         return observation
 
     def finalize(self, recorder: SessionRecorder) -> Path:
@@ -72,11 +74,15 @@ class EvidenceBundle:
             json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
         )
-        recorder.data["instrumentation"] = {
-            "enabled": True,
-            "protocol": "MGOP",
-            "protocol_version": self.protocol_version,
-        }
+        instrumentation = dict(recorder.data.get("instrumentation") or {})
+        instrumentation.update(
+            {
+                "enabled": True,
+                "protocol": "MGOP",
+                "protocol_version": self.protocol_version,
+            }
+        )
+        recorder.data["instrumentation"] = instrumentation
         recorder.data["evidence_bundle"] = {
             "manifest": str(manifest_path),
             "state_dir": str(self.state_dir),
