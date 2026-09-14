@@ -1,8 +1,9 @@
 """Run an interactive, one-action-at-a-time Godot playtest session.
 
-The process is intentionally a thin control loop.  It never reads the game
-project and never asks the adapter for hidden state.  An AI (or a human
-operator) supplies one JSON command after inspecting the latest screenshot.
+The default black_box mode is screenshot-driven and never asks the game for
+hidden state. Instrumented mode is an explicit opt-in: it keeps ordinary
+player input as the action path while attaching MGOP state, metrics, and errors
+to each screenshot observation.
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ import argparse
 from dataclasses import asdict, is_dataclass
 import json
 import math
+import os
 import queue
 import sys
 import threading
@@ -23,10 +25,13 @@ if str(SKILL_ROOT) not in sys.path:
     sys.path.insert(0, str(SKILL_ROOT))
 
 from adapters.godot.godot_adapter import GodotAdapter, GodotAdapterError  # noqa: E402
+from scripts.evidence_bundle import EvidenceBundle  # noqa: E402
+from scripts.mgop_client import MGOPClient, MGOPError  # noqa: E402
 from scripts.session import SessionRecorder  # noqa: E402
 
 
 PERSONAS = ("first_time", "impatient", "explorer")
+MODES = ("black_box", "instrumented")
 ADAPTER_ACTIONS = {
     "press_key",
     "key_down",
@@ -38,6 +43,8 @@ ADAPTER_ACTIONS = {
     "terminate_game",
 }
 RECORD_COMMANDS = {"insight", "finding", "reached_point", "reproduction_steps"}
+
+
 def emit(event: str, **payload: Any) -> None:
     """Write one machine-readable event for an AI controller."""
 
@@ -124,6 +131,117 @@ def _capture(adapter: GodotAdapter, recorder: SessionRecorder, *, label: str) ->
         return None, str(exc)
 
 
+def _resolve_mode(args: argparse.Namespace) -> str:
+    requested = args.mode
+    if args.mgop:
+        if requested == "black_box":
+            raise ValueError("--mgop cannot be combined with --mode black_box")
+        return "instrumented"
+    return requested or "black_box"
+
+
+def _enable_mgop_environment(port: int) -> dict[str, str | None]:
+    """Enable the child runtime bridge while preserving the caller environment."""
+
+    previous = {
+        "MADOWAKU_MGOP": os.environ.get("MADOWAKU_MGOP"),
+        "MADOWAKU_MGOP_PORT": os.environ.get("MADOWAKU_MGOP_PORT"),
+    }
+    os.environ["MADOWAKU_MGOP"] = "1"
+    os.environ["MADOWAKU_MGOP_PORT"] = str(port)
+    return previous
+
+
+def _restore_environment(previous: Mapping[str, str | None]) -> None:
+    for key, value in previous.items():
+        if value is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = value
+
+
+def _await_mgop(client: MGOPClient, connect_timeout_s: float) -> dict[str, Any]:
+    """Wait for the runtime bridge after the visible game window appears."""
+
+    deadline = time.monotonic() + connect_timeout_s
+    last_error: Exception | None = None
+    while True:
+        try:
+            hello = client.hello()
+            version = str(hello.get("mgop_version", ""))
+            if version != "1.0":
+                raise MGOPError(f"unsupported MGOP version: {version or 'missing'}")
+            return hello
+        except (OSError, MGOPError) as exc:
+            last_error = exc
+        if time.monotonic() >= deadline:
+            raise MGOPError(
+                f"MGOP bridge was not ready within {connect_timeout_s:g}s: {last_error}"
+            ) from last_error
+        time.sleep(0.1)
+
+
+def _collect_mgop(client: MGOPClient) -> dict[str, Any]:
+    """Collect each diagnostic channel independently so one failure does not erase the rest."""
+
+    result: dict[str, Any] = {
+        "state": None,
+        "metrics": None,
+        "errors": None,
+        "collection_errors": {},
+    }
+    operations = (
+        ("state", client.get_state),
+        ("metrics", client.get_metrics),
+        ("errors", client.get_errors),
+    )
+    for name, operation in operations:
+        try:
+            result[name] = operation()
+        except (OSError, MGOPError, ValueError) as exc:
+            result["collection_errors"][name] = str(exc)
+    return result
+
+
+def _record_observation(
+    adapter: GodotAdapter,
+    recorder: SessionRecorder,
+    *,
+    label: str,
+    step: int,
+    state_summary: str = "",
+    player_facing_audio: str = "",
+    bundle: EvidenceBundle | None = None,
+    mgop_client: MGOPClient | None = None,
+) -> tuple[dict[str, Any] | None, str, dict[str, Any] | None]:
+    screenshot, capture_error = _capture(adapter, recorder, label=label)
+    if bundle is None or mgop_client is None:
+        recorder.record_observation(
+            screenshot,
+            step=step,
+            state_summary=state_summary,
+            player_facing_audio=player_facing_audio,
+        )
+        return screenshot, capture_error, None
+
+    instrumentation = _collect_mgop(mgop_client)
+    observation = bundle.record_instrumented_observation(
+        recorder,
+        screenshot,
+        step=step,
+        state=instrumentation["state"],
+        metrics=instrumentation["metrics"],
+        errors=instrumentation["errors"],
+        state_summary=state_summary,
+        player_facing_audio=player_facing_audio,
+    )
+    collection_errors = instrumentation.get("collection_errors") or {}
+    if collection_errors:
+        observation["mgop_collection_errors"] = dict(collection_errors)
+    instrumentation["paths"] = dict(observation.get("mgop") or {})
+    return screenshot, capture_error, instrumentation
+
+
 def _stdin_reader(target: queue.Queue[str | None]) -> None:
     try:
         for line in sys.stdin:
@@ -140,6 +258,26 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--window-title", help="Optional visible-window title substring")
     parser.add_argument("--persona", choices=PERSONAS, default="first_time")
     parser.add_argument("--scenario", default="short-game")
+    parser.add_argument(
+        "--mode",
+        choices=MODES,
+        default=None,
+        help="black_box (default) or explicit MGOP-backed instrumented observation",
+    )
+    parser.add_argument(
+        "--mgop",
+        action="store_true",
+        help="Shortcut for --mode instrumented",
+    )
+    parser.add_argument("--mgop-host", default="127.0.0.1")
+    parser.add_argument("--mgop-port", type=int, default=49561)
+    parser.add_argument("--mgop-timeout", type=float, default=1.0, help="Per-request MGOP timeout")
+    parser.add_argument(
+        "--mgop-connect-timeout",
+        type=float,
+        default=5.0,
+        help="How long instrumented mode waits for the bridge after launch",
+    )
     parser.add_argument("--out", default="game-test-evidence")
     parser.add_argument("--startup-wait", type=float, default=1.0)
     parser.add_argument("--window-timeout", type=float, default=15.0)
@@ -187,18 +325,40 @@ def _handle_record_command(recorder: SessionRecorder, command: Mapping[str, Any]
 
 
 def run(args: argparse.Namespace) -> int:
+    mode = _resolve_mode(args)
+    black_box = mode == "black_box"
     out_dir = Path(args.out).expanduser().resolve()
     recorder = SessionRecorder(
         persona=args.persona,
         scenario=args.scenario,
         evidence_dir=out_dir,
         adapter="godot",
-        black_box=True,
+        black_box=black_box,
     )
+    recorder.data["mode"] = mode
+
     adapter: GodotAdapter | None = None
+    bundle: EvidenceBundle | None = None
+    mgop_client: MGOPClient | None = None
+    previous_mgop_env: dict[str, str | None] | None = None
     finished_reason = ""
     return_code = 0
     try:
+        if mode == "instrumented":
+            previous_mgop_env = _enable_mgop_environment(args.mgop_port)
+            bundle = EvidenceBundle(out_dir)
+            mgop_client = MGOPClient(
+                host=args.mgop_host,
+                port=args.mgop_port,
+                timeout_s=args.mgop_timeout,
+            )
+            recorder.data["instrumentation"] = {
+                "enabled": True,
+                "protocol": "MGOP",
+                "protocol_version": "1.0",
+                "status": "starting",
+            }
+
         adapter = GodotAdapter(
             args.game,
             godot_binary=args.godot,
@@ -209,10 +369,36 @@ def run(args: argparse.Namespace) -> int:
             window_timeout=args.window_timeout,
         )
         launch_info = adapter.launch_game()
-        emit("ready", black_box=True, persona=args.persona, scenario=args.scenario, launch=launch_info)
-        screenshot, capture_error = _capture(adapter, recorder, label="initial")
-        recorder.record_observation(screenshot, step=0, state_summary="")
-        emit("observation", step=0, screenshot=screenshot, capture_error=capture_error)
+
+        mgop_hello = None
+        if mgop_client is not None:
+            mgop_hello = _await_mgop(mgop_client, args.mgop_connect_timeout)
+            recorder.data["instrumentation"].update({"status": "ready", "hello": mgop_hello})
+
+        emit(
+            "ready",
+            black_box=black_box,
+            mode=mode,
+            persona=args.persona,
+            scenario=args.scenario,
+            launch=launch_info,
+            instrumentation=mgop_hello,
+        )
+        screenshot, capture_error, instrumentation = _record_observation(
+            adapter,
+            recorder,
+            label="initial",
+            step=0,
+            bundle=bundle,
+            mgop_client=mgop_client,
+        )
+        emit(
+            "observation",
+            step=0,
+            screenshot=screenshot,
+            capture_error=capture_error,
+            instrumentation=instrumentation,
+        )
         _save_reports(recorder)
 
         incoming: queue.Queue[str | None] = queue.Queue()
@@ -328,12 +514,16 @@ def run(args: argparse.Namespace) -> int:
                     adapter.wait(settle_s)
                 except Exception as exc:
                     error_text = str(exc)
-            screenshot, capture_error = _capture(adapter, recorder, label="observation")
-            recorder.record_observation(
-                screenshot,
+
+            screenshot, capture_error, instrumentation = _record_observation(
+                adapter,
+                recorder,
+                label="observation",
                 step=action_step,
                 state_summary=str(command.get("state_summary", "")),
                 player_facing_audio=str(command.get("player_facing_audio", "")),
+                bundle=bundle,
+                mgop_client=mgop_client,
             )
             _save_reports(recorder)
             emit(
@@ -343,6 +533,7 @@ def run(args: argparse.Namespace) -> int:
                 operation_error=error_text,
                 screenshot=screenshot,
                 capture_error=capture_error,
+                instrumentation=instrumentation,
                 game_running=adapter.is_running,
             )
             if action == "terminate_game":
@@ -350,7 +541,7 @@ def run(args: argparse.Namespace) -> int:
                 recorder.finish("aborted", reason=finished_reason)
                 emit("finished", outcome="aborted", reason=finished_reason)
 
-    except (GodotAdapterError, OSError, ValueError) as exc:
+    except (GodotAdapterError, MGOPError, OSError, ValueError) as exc:
         finished_reason = str(exc)
         if not recorder.finished:
             recorder.finish("aborted", reason=finished_reason)
@@ -361,17 +552,40 @@ def run(args: argparse.Namespace) -> int:
             adapter.terminate_game()
         if not recorder.finished:
             recorder.finish("aborted", reason=finished_reason or "runner exited before finish")
+        manifest_path = None
+        if bundle is not None:
+            manifest_path = bundle.finalize(recorder)
+        if previous_mgop_env is not None:
+            _restore_environment(previous_mgop_env)
         json_path, markdown_path = _save_reports(recorder)
-        emit("reports", json=str(json_path), markdown=str(markdown_path), summary=recorder.summary())
+        emit(
+            "reports",
+            json=str(json_path),
+            markdown=str(markdown_path),
+            bundle=str(manifest_path) if manifest_path else None,
+            summary=recorder.summary(),
+        )
     return return_code
 
 
 def main() -> int:
     args = _build_parser().parse_args()
+    try:
+        mode = _resolve_mode(args)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+    args.mode = mode
     if args.max_steps < 1:
         raise SystemExit("--max-steps must be at least 1")
     if not math.isfinite(args.max_seconds) or args.max_seconds <= 0:
         raise SystemExit("--max-seconds must be greater than 0")
+    if mode == "instrumented":
+        if args.mgop_port < 1 or args.mgop_port > 65535:
+            raise SystemExit("--mgop-port must be between 1 and 65535")
+        if not math.isfinite(args.mgop_timeout) or args.mgop_timeout <= 0:
+            raise SystemExit("--mgop-timeout must be greater than 0")
+        if not math.isfinite(args.mgop_connect_timeout) or args.mgop_connect_timeout < 0:
+            raise SystemExit("--mgop-connect-timeout must be non-negative")
     return run(args)
 
 

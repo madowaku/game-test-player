@@ -1,0 +1,28 @@
+; Godot 4 project for game-test-player MGOP end-to-end smoke validation.
+; This is a diagnostic fixture, not a representative gameplay sample.
+
+config_version=5
+
+[application]
+
+config/name="MGOP Smoke Fixture"
+run/main_scene="res://main.tscn"
+
+[display]
+
+window/size/viewport_width=640
+window/size/viewport_height=360
+window/size/window_width_override=640
+window/size/window_height_override=360
+window/stretch/mode="canvas_items"
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
+
+environment/defaults/default_clear_color=Color(0.055, 0.063, 0.082, 1)
+
+[autoload]
+
+MGOPBridge="*res://mgop_bridge.gd"
