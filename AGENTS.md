@@ -46,6 +46,28 @@ The canonical protocol is `.agents/skills/game-test-player/references/MGOP_SPEC.
 - Runtime diagnostic bridges must be opt-in and should be disabled in production builds.
 - Never silently expose MGOP data to a black-box session.
 
+## Runner contract
+
+The normal instrumented entry point is:
+
+```text
+python .agents/skills/game-test-player/scripts/run_session.py --game <game> --mode instrumented --scenario <scenario> --out <evidence>
+```
+
+`--mgop` is an equivalent shortcut for opting into instrumented mode.
+
+In instrumented mode, the runner must:
+
+- enable the MGOP bridge only for the launched diagnostic game process;
+- require a successful MGOP v1 startup handshake and never silently downgrade to black-box;
+- preserve ordinary keyboard/mouse input as the gameplay action path;
+- collect screenshot + state + metrics + errors at the initial observation and after each action;
+- align all evidence by the same step number;
+- preserve MGOP enablement across `restart_game`;
+- restore the caller environment when the run exits;
+- record per-channel collection failures without discarding the remaining evidence; and
+- finalize `bundle.json` beside `session.json` and `report.md`.
+
 ## Evidence requirements
 
 A significant diagnostic fix should preserve enough evidence to answer:
@@ -84,3 +106,10 @@ Game-specific projects should register Callables for state, metrics, errors, sce
 ## Validation
 
 Preserve existing black-box self-check behavior. New instrumented features should add checks without weakening the original player-perspective contract.
+
+When the host can execute Python, run both dependency-free checks after changing runner/MGOP plumbing:
+
+```text
+python .agents/skills/game-test-player/scripts/self_check.py
+python .agents/skills/game-test-player/scripts/self_check_mgop.py
+```
