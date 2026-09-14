@@ -56,6 +56,16 @@ The final report must contain at least Persona, play time, action count, reached
 
 Read [references/black-box-policy.md](references/black-box-policy.md) when a run might be tempted to use project/debug data, and [references/session-schema.json](references/session-schema.json) when another tool needs to consume the JSON.
 
+## Instrumented MGOP workflow
+
+MGOP is an explicit instrumented/diagnostic path and must never silently alter `first_time` black-box behavior. The canonical contract is [references/MGOP_SPEC.md](references/MGOP_SPEC.md).
+
+For Godot 4 development/test builds, install [adapters/godot/runtime/mgop_bridge.gd](adapters/godot/runtime/mgop_bridge.gd) as an Autoload in the target project and enable it only with `MADOWAKU_MGOP=1`. Game-specific projects register Callables that expose allowed state, metrics, errors, named scenario loading, and reset behavior.
+
+Use [scripts/mgop_client.py](scripts/mgop_client.py) to query the local JSONL bridge and [scripts/evidence_bundle.py](scripts/evidence_bundle.py) to write MGOP `state/`, `metrics/`, and `errors/` artifacts beside the existing session screenshots. Instrumented observations should keep the same session step numbers so before/after evidence stays comparable.
+
+A fixture scenario is a diagnostic shortcut, not proof that the real player journey works. For critical gameplay flows, rerun the corresponding ordinary journey after a fix when practical.
+
 ## Adapter boundary
 
-Keep future adapters behind the same session operations and evidence shape. Do not add a Godot-specific internal-driver API to v0.1. An instrumented mode can be added later as an explicitly separate mode with an explicit policy flag; it must never silently run in `first_time`.
+Keep future adapters behind the same session operations and evidence shape. Black-box and instrumented capabilities must remain explicit modes. Do not add Godot-specific hidden-state APIs to the default black-box path, and never expose instrumented data to `first_time` unless the caller explicitly opts out of black-box testing.
