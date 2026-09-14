@@ -76,6 +76,28 @@ Use [scripts/mgop_client.py](scripts/mgop_client.py) when a standalone MGOP quer
 
 A fixture scenario is a diagnostic shortcut, not proof that the real player journey works. For critical gameplay flows, rerun the corresponding ordinary journey after a fix when practical.
 
+## Real Godot MGOP smoke fixture
+
+The committed Godot 4 project at [fixtures/godot-smoke](fixtures/godot-smoke) is the real-engine infrastructure smoke target. It is not a UX scenario. Its only job is to prove that an ordinary player input can produce a visible state change and a matching MGOP state change in the same Evidence Bundle.
+
+On Windows with Godot 4 available, run:
+
+```text
+python .agents/skills/game-test-player/scripts/run_godot_smoke.py
+```
+
+Or pass the executable explicitly:
+
+```text
+python .agents/skills/game-test-player/scripts/run_godot_smoke.py --godot "C:\path\to\Godot_v4.x-stable_win64.exe"
+```
+
+The fixture starts in `IDLE`. The smoke runner waits for the MGOP handshake and step-0 observation, sends exactly one ordinary `SPACE` key action, then requires step 1 to be visibly captured and internally reported as `ACTIVATED`. It also requires `objective.state=complete`, `input.last_action=space`, `extensions.smoke_fixture.action_count=1`, two aligned bundle entries, and a successful session report.
+
+The fixture vendors a byte-identical copy of the canonical `mgop_bridge.gd` because Godot resources are scoped to the project `res://` root. `run_godot_smoke.py` refuses to run if the fixture bridge has drifted from the canonical bridge.
+
+Passing this smoke validates infrastructure only. It never replaces a black-box first-time run or a critical player journey.
+
 ## Persona behavior
 
 Persona files are deliberately short and behavioral. They must change what the tester notices and tries, not grant hidden knowledge:
