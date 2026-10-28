@@ -34,7 +34,12 @@ def main() -> int:
             godot_binary=sys.executable,
             evidence_dir=workspace / "project-evidence",
         )
-        assert project_adapter.command == [sys.executable, "--path", str(project_dir)]
+        # Windows may canonicalize executable paths and their letter case via shutil.which.
+        # Check executable identity and exact argument structure separately.
+        assert len(project_adapter.command) == 3
+        assert Path(project_adapter.command[0]).samefile(sys.executable)
+        assert project_adapter.command[1] == "--path"
+        assert Path(project_adapter.command[2]).samefile(project_dir)
 
         recorder = SessionRecorder(
             persona="first_time",
