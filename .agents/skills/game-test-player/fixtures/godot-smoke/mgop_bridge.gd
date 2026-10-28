@@ -26,6 +26,9 @@ var _reset_handler: Callable
 
 
 func _ready() -> void:
+    # The diagnostic bridge must keep polling TCP while the game is paused,
+    # otherwise the resume request can never be processed.
+    process_mode = Node.PROCESS_MODE_ALWAYS
     _enabled = OS.get_environment("MADOWAKU_MGOP") == "1"
     if not _enabled:
         return

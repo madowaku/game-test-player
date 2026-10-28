@@ -1,0 +1,42 @@
+name: MGOP contract and real-engine headless smoke
+
+on:
+  pull_request:
+    paths:
+      - '.agents/skills/game-test-player/**'
+      - '.github/workflows/mgop-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  python-contract:
+    name: Python black-box and instrumented contracts
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Black-box self-check
+        run: python .agents/skills/game-test-player/scripts/self_check.py
+      - name: MGOP self-check
+        run: python .agents/skills/game-test-player/scripts/self_check_mgop.py
+
+  godot-protocol:
+    name: Godot 4.7.2 headless MGOP protocol
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: chickensoft-games/setup-godot@v2
+        with:
+          version: 4.7.2
+          use-dotnet: false
+      - name: Verify engine
+        run: godot --version
+      - name: Real-engine headless protocol smoke
+        run: python .agents/skills/game-test-player/scripts/run_headless_mgop_smoke.py
