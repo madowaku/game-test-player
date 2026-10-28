@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Browser journey diagnostic fixture</title>
+<style>
+  body { margin: 24px; background: #14202b; color: #f5f7fa; font: 16px system-ui; }
+  h1 { margin: 0; font-size: 25px; }
+  .hud { position: absolute; left: 24px; top: 72px; display: flex; gap: 28px; }
+  button { position: absolute; left: 24px; top: 115px; width: 160px; height: 48px;
+           font: bold 18px system-ui; background: #e6eff7; color: #14202b; border: 0; }
+  button:disabled { opacity: .45; }
+  #held { position: absolute; left: 210px; top: 130px; }
+  #hint { position: absolute; left: 24px; top: 174px; margin: 0; }
+  canvas { position: absolute; left: 24px; top: 210px; }
+  footer { position: absolute; left: 24px; top: 435px; color: #c1cfdd; }
+</style>
+<h1>Detour — diagnostic fixture</h1>
+<div class="hud"><strong id="status">Ready</strong><span id="position">Position: 0,0</span>
+  <span id="attempt">Attempt: 0</span></div>
+<button id="start">Start</button><span id="held">Keys: none</span>
+<p id="hint">Arrow keys move. Avoid the red tile. Reach the gold tile.</p>
+<canvas id="board" width="500" height="200" aria-label="Five by two tile playfield"></canvas>
+<footer>Scripted fixture only · green square = player · no external assets</footer>
+<script>
+(() => {
+  // Faults affect normal event/render paths, never grant an outcome to the runner.
+  const fault = new URLSearchParams(location.search).get('fault') || 'none';
+  const status = document.querySelector('#status');
+  const position = document.querySelector('#position');
+  const attempt = document.querySelector('#attempt');
+  const button = document.querySelector('#start');
+  const heldLabel = document.querySelector('#held');
+  const ctx = document.querySelector('#board').getContext('2d');
+  let phase = 'Ready', x = 0, y = 0, attempts = 0;
+  const held = new Set();
+  function paint() {
+    status.textContent = phase;
+    position.textContent = `Position: ${x},${y}`;
+    attempt.textContent = `Attempt: ${attempts}`;
+    button.textContent = phase === 'Ready' ? 'Start' : 'Retry';
+    button.disabled = phase === 'Playing';
+    if (fault === 'stale-render' && x > 0) return;
+    ctx.fillStyle = '#203345'; ctx.fillRect(0, 0, 500, 200);
+    ctx.fillStyle = '#c34f5c'; ctx.fillRect(202, 2, 96, 96);
+    ctx.fillStyle = '#e6ba55'; ctx.fillRect(402, 2, 96, 96);
+    ctx.strokeStyle = '#7390a8'; ctx.lineWidth = 2;
+    for (let col = 0; col < 5; col++) for (let row = 0; row < 2; row++)
+      ctx.strokeRect(col * 100 + 1, row * 100 + 1, 98, 98);
+    ctx.fillStyle = '#52d399'; ctx.fillRect(x * 100 + 30, y * 100 + 30, 40, 40);
+  }
+  // A small real asynchronous transition exercises bounded polling.
+  function renderSoon() { setTimeout(paint, 80); }
+  button.addEventListener('click', () => {
+    if (phase === 'Ready' && fault === 'start-ignored') return;
+    if (phase === 'Failed' && fault === 'retry-broken') return;
+    if (phase === 'Success' && fault === 'success-retry-broken') return;
+    if (phase === 'Playing') return;
+    x = y = 0; attempts++; phase = 'Playing'; renderSoon();
+  });
+  document.addEventListener('keydown', event => {
+    if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return;
+    event.preventDefault(); held.add(event.key);
+    heldLabel.textContent = `Keys: ${[...held].join(',')}`;
+    if (event.repeat || phase !== 'Playing' || fault === 'input-ignored') return;
+    x = Math.max(0, Math.min(4, x + (event.key === 'ArrowRight') - (event.key === 'ArrowLeft')));
+    y = Math.max(0, Math.min(1, y + (event.key === 'ArrowDown') - (event.key === 'ArrowUp')));
+    if (x === 2 && y === 0 && fault !== 'failure-ignored') phase = 'Failed';
+    if (x === 4 && y === 0 && fault !== 'success-ignored') phase = 'Success';
+    renderSoon();
+    if (fault === 'runtime-error') throw new Error('Injected input handler error');
+  });
+  document.addEventListener('keyup', event => {
+    held.delete(event.key);
+    heldLabel.textContent = `Keys: ${held.size ? [...held].join(',') : 'none'}`;
+  });
+  paint();
+})();
+</script>
+</html>
